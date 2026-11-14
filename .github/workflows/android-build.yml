@@ -1,0 +1,96 @@
+
+name: RiderWise AI Android Build
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find and extract RiderWise ZIP
+        run: |
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "RiderWise ZIP not found in repository root."
+            exit 1
+          fi
+          unzip -q "$ZIP_FILE" -d "$RUNNER_TEMP/riderwise-src"
+          test -f "$RUNNER_TEMP/riderwise-src/project/settings.gradle"
+          cp -R "$RUNNER_TEMP/riderwise-src/project" "$GITHUB_WORKSPACE/riderwise-project"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Validate Luzon PSGC dataset
+        working-directory: riderwise-project
+        run: python3 tools/verify_psgc.py
+
+      - name: Install Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Generate Gradle Wrapper
+        working-directory: riderwise-project
+        run: |
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+          chmod +x gradlew
+          test -s gradle/wrapper/gradle-wrapper.jar
+          test -s gradlew
+          test -s gradlew.bat
+          ./gradlew --version
+
+      - name: Upload wrapper-complete source
+        working-directory: riderwise-project
+        run: |
+          zip -r "$GITHUB_WORKSPACE/RiderWise-wrapper-complete-source.zip" . \
+            -x './.git/*' './.gradle/*' './**/build/*'
+
+      - name: Upload source ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RiderWise-wrapper-complete-source
+          path: RiderWise-wrapper-complete-source.zip
+          retention-days: 14
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Build and run unit tests
+        working-directory: riderwise-project
+        run: ./gradlew --no-daemon clean testDebugUnitTest assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RiderWise-AI-debug-APK
+          path: riderwise-project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RiderWise-test-reports
+          path: riderwise-project/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
