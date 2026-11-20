@@ -3,9 +3,9 @@ name: RiderWise AI Android Build
 
 on:
   push:
-    branches: [main, development]
+    branches: [main, development, "2.3"]
   pull_request:
-    branches: [main, development]
+    branches: [main, development, "2.3"]
   workflow_dispatch:
 
 permissions:
@@ -20,15 +20,35 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Find and extract RiderWise ZIP
+        shell: bash
         run: |
-          ZIP_FILE="$(find . -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+
           if [ -z "$ZIP_FILE" ]; then
-            echo "RiderWise ZIP not found in repository root."
+            echo "::error::RiderWise ZIP not found!"
             exit 1
           fi
+
+          echo "Found ZIP: $ZIP_FILE"
+
+          mkdir -p "$RUNNER_TEMP/riderwise-src"
           unzip -q "$ZIP_FILE" -d "$RUNNER_TEMP/riderwise-src"
-          test -f "$RUNNER_TEMP/riderwise-src/project/settings.gradle"
-          cp -R "$RUNNER_TEMP/riderwise-src/project" "$GITHUB_WORKSPACE/riderwise-project"
+
+          SETTINGS_FILE="$(find "$RUNNER_TEMP/riderwise-src" -type f -name 'settings.gradle' -print -quit)"
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "::error::settings.gradle not found inside ZIP!"
+            exit 1
+          fi
+
+          PROJECT_ROOT="$(dirname "$SETTINGS_FILE")"
+
+          cp -R "$PROJECT_ROOT" "$GITHUB_WORKSPACE/riderwise-project"
+
+          test -f riderwise-project/settings.gradle
+          test -d riderwise-project/app
+
+          echo "RiderWise project detected successfully!"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
